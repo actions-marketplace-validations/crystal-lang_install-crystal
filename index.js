@@ -181,15 +181,36 @@ async function installCrystalForMac({crystal, shards, arch = "x86_64", path}) {
     Core.exportVariable("PKG_CONFIG_PATH", pkgConfigPath);
 }
 
+async function isAptCacheEmpty() {
+    try {
+        const entries = await FS.readdir("/var/lib/apt/lists");
+        return !entries.some((name) => name !== "partial" && name !== "lock");
+    } catch (error) {
+        return true;
+    }
+}
+
 async function installAptPackages(packages) {
     Core.info("Installing package dependencies");
-    const command = [
-        "apt-get", "install", "-qy", "--no-install-recommends", "--no-upgrade", "--",
-    ].concat(packages);
-    if (await IO.which("sudo")) {
-        command.unshift("sudo", "-n");
+    const sudo = (await IO.which("sudo")) ? ["sudo", "-n"] : [];
+
+    if (await isAptCacheEmpty()) {
+        const updateCommand = [...sudo, "apt-get", "update", "-qq"];
+        try {
+            await subprocess(updateCommand);
+        } catch (error) {
+            Core.warning(`apt-get update failed, continuing anyway: ${error.message}`);
+        }
+    } else {
+        Core.info("Skipping apt-get update: package lists already present");
     }
-    const {stdout} = await subprocess(command);
+
+    const installCommand = [
+        ...sudo,
+        "apt-get", "install", "-qy", "--no-install-recommends", "--no-upgrade", "--",
+        ...packages,
+    ];
+    const {stdout} = await subprocess(installCommand);
     Core.startGroup("Finished installing package dependencies");
     Core.info(stdout);
     Core.endGroup();
